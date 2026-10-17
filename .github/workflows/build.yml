@@ -1,0 +1,95 @@
+name: Build binaries
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x64
+            ext: ""
+          - os: windows-latest
+            name: windows-x64
+            ext: ".exe"
+          - os: macos-latest
+            name: macos-arm64
+            ext: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Build executable
+        shell: bash
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile \
+            --name snowrunner-map-converter \
+            --hidden-import sr_mesh \
+            --hidden-import sr_objects \
+            --hidden-import sr_textures \
+            --hidden-import sr_gltf \
+            --hidden-import sr_i18n \
+            --hidden-import sr_print \
+            --hidden-import sr_split \
+            snowrunner_map_converter.py
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          ./dist/snowrunner-map-converter${{ matrix.ext }} --version
+          ./dist/snowrunner-map-converter${{ matrix.ext }} --check
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p package
+          cp "dist/snowrunner-map-converter${{ matrix.ext }}" package/
+          cp README.md README.ru.md README.en.md LICENSE package/
+          cp -r docs package/
+          cd package
+          python -c "import shutil; shutil.make_archive('../snowrunner-map-converter-${{ matrix.name }}','zip','.')"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snowrunner-map-converter-${{ matrix.name }}
+          path: snowrunner-map-converter-${{ matrix.name }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish release assets
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          generate_release_notes: true

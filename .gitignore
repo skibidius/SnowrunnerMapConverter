@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# PyInstaller / packaging
+build/
+dist/
+*.spec
+*.egg-info/
+.eggs/
+wheels/
+
+# SnowRunner game archives (large, not distributable)
+*.pak
+
+# Generated models / textures / previews
+*.stl
+*.glb
+*.gltf
+*.bin
+*.u16
+*.f32
+*.dds
+*.tga
+*.obj
+*.mtl
+*.ply
+*_preview.png
+*_tiles.json
+*_objects.json
+*_meta.json
+*_textures/
+outdir/
+output/
+
+# Local config and IDE files
+snowrunner_map_converter.config.json
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Archives / release packages
+*.zip
