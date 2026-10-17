@@ -57,6 +57,24 @@ except ImportError:  # pragma: no cover
     )
     raise SystemExit(1)
 
+def _setup_console() -> None:
+    """Use UTF-8 for console output; Windows cmd defaults to cp1252/cp866."""
+    if sys.platform.startswith("win"):
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+            ctypes.windll.kernel32.SetConsoleCP(65001)
+        except Exception:
+            pass
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_setup_console()
+
 try:
     import sr_mesh
     import sr_objects
@@ -133,7 +151,7 @@ DXGI_FORMATS = {
     0x37: 56,   # R16_UNORM
 }
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 
 # ---------------------------------------------------------------------------
