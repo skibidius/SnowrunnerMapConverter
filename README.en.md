@@ -24,6 +24,33 @@ All paks must be from the same game version. `shared.pak` and `editor.pak` are s
 
 Prebuilt binaries are in Releases.
 
+The terminal has spinners for short operations and progress bars for objects, textures and tiles. Use `--no-tui` for logs/CI.
+
+## Where the pak files are
+
+Three kinds of files are used:
+
+- `level_*.pak` — the level itself, required;
+- `shared.pak` — object meshes, needed for the full scene;
+- `editor.pak` — object textures, needed for textures.
+
+They are usually in the game folder:
+
+```
+Windows (Steam): C:\Program Files (x86)\Steam\steamapps\common\SnowRunner\preload\paks\
+Windows (Epic):  C:\Program Files\Epic Games\SnowRunner\preload\paks\
+macOS (Steam):   ~/Library/Application Support/Steam/steamapps/common/SnowRunner/preload/paks/
+Linux (Proton):  ~/.steam/steam/steamapps/common/SnowRunner/preload/paks/
+```
+
+Levels may be in the `levels` subfolder. Copy the needed `level_*.pak`, `shared.pak` and `editor.pak` into one folder, or pass them with `--shared-pak` and `--editor-pak`.
+
+Full help:
+
+```bash
+python3 snowrunner_map_converter.py --where-paks
+```
+
 ## Usage
 
 ```bash
@@ -126,7 +153,7 @@ pyinstaller --onefile --name snowrunner-map-converter \
   --hidden-import sr_mesh --hidden-import sr_objects \
   --hidden-import sr_textures --hidden-import sr_gltf \
   --hidden-import sr_print --hidden-import sr_split \
-  --hidden-import sr_i18n snowrunner_map_converter.py
+  --hidden-import sr_i18n --hidden-import sr_tui snowrunner_map_converter.py
 ```
 
 GitHub Actions builds Windows, Linux and macOS on push. A `v*` tag publishes the archives to Releases.

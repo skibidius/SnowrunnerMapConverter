@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from contextlib import nullcontext
 import math
 import os
 import re
@@ -86,6 +87,11 @@ except ImportError:
     sr_textures = None  # type: ignore[assignment]
     GltfBuilder = None  # type: ignore[assignment]
     MeshPart = None  # type: ignore[assignment]
+
+try:
+    import sr_tui
+except ImportError:
+    sr_tui = None  # type: ignore[assignment]
 
 try:
     import sr_print
@@ -151,7 +157,7 @@ DXGI_FORMATS = {
     0x37: 56,   # R16_UNORM
 }
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 
 # ---------------------------------------------------------------------------
@@ -1248,9 +1254,16 @@ def export_stl_full(path: Path, base_meshes: Sequence[Mesh], ssl_name: str,
             _write_stl_triangles(f, tri)
             written += len(tri)
 
+        progress = None
+        if sr_tui is not None:
+            total = sum(len(g.instances) for g in groups)
+            if total:
+                progress = sr_tui.Progress(t("tui_instances"), total)
         for group in groups:
             proto = prototypes.get(group.mesh_name)
             if proto is None:
+                if progress is not None:
+                    progress.advance(len(group.instances))
                 continue
             positions, indices = proto
             chunk: list[np.ndarray] = []
@@ -1268,6 +1281,10 @@ def export_stl_full(path: Path, base_meshes: Sequence[Mesh], ssl_name: str,
                 tri = np.concatenate(chunk, axis=0)
                 _write_stl_triangles(f, tri)
                 written += len(tri)
+            if progress is not None:
+                progress.advance(len(group.instances))
+        if progress is not None:
+            progress.close()
         f.seek(80)
         f.write(struct.pack("<I", written))
 
@@ -1517,26 +1534,24 @@ def export_textures(store: FileStore, out_dir: Path, height_name: str | None,
     exported: list[dict] = []
     names = [n for n in store.names() if n.lower().endswith(".pct")
              and not n.lower().endswith(".pct_header")]
-    for name in names:
+    progress = None
+    if sr_tui is not None and names:
+        progress = sr_tui.Progress(t("tui_textures"), len(names))
+    for idx, name in enumerate(names, 1):
+        if progress is not None:
+            progress.update(idx - 1)
         try:
             pct = parse_pct(name, store.read(name))
-        except Exception as exc:  # noqa: BLE001
-            eprint(f"  ! {name}: {exc}")
-            continue
-        stem = Path(name).stem
-        info = {
-            "name": name, "width": pct.width, "height": pct.height,
-            "format": pct.format_name, "mips": pct.mip_count,
-        }
-        try:
+            stem = Path(name).stem
+            info = {
+                "name": name, "width": pct.width, "height": pct.height,
+                "format": pct.format_name, "mips": pct.mip_count,
+            }
             if pct.format_id in (0x03, 0x37):
                 arr = pct.array()
-                if pct.format_id == 0x37:
-                    p = out_dir / f"{stem}.png"
-                    write_png(p, arr, bit_depth=16, color_type=0)
-                else:
-                    p = out_dir / f"{stem}.png"
-                    write_png(p, arr, bit_depth=8, color_type=0)
+                p = out_dir / f"{stem}.png"
+                write_png(p, arr, bit_depth=16 if pct.format_id == 0x37 else 8,
+                          color_type=0)
                 info["file"] = str(p)
             elif pct.format_id == 0x2A:
                 arr = pct.array().astype("<f4")
@@ -1554,23 +1569,22 @@ def export_textures(store: FileStore, out_dir: Path, height_name: str | None,
                         info["preview"] = str(p)
             elif pct.format_id in (0x00, 0x16):
                 arr = pct.array().reshape(pct.height, pct.width, 4)
-                if pct.format_id == 0x00:
-                    rgb = arr[..., [2, 1, 0]]
-                else:
-                    rgb = arr[..., [2, 1, 0]]
                 p = out_dir / f"{stem}.png"
-                write_png(p, rgb, bit_depth=8, color_type=2)
+                write_png(p, arr[..., [2, 1, 0]], bit_depth=8, color_type=2)
                 info["file"] = str(p)
             else:
                 p = out_dir / f"{stem}.dds"
                 write_dds(p, pct)
                 info["file"] = str(p)
+            exported.append(info)
+            if verbose:
+                print(f"    {name}: {pct.width}x{pct.height} {pct.format_name} -> {info.get('file', '-')}")
         except Exception as exc:  # noqa: BLE001
             eprint(f"  ! {name}: {exc}")
-            continue
-        exported.append(info)
-        if verbose:
-            print(f"    {name}: {pct.width}x{pct.height} {pct.format_name} -> {info.get('file', '-')}")
+        if progress is not None:
+            progress.update(idx)
+    if progress is not None:
+        progress.close()
     return exported
 
 
@@ -1732,6 +1746,10 @@ def build_full_scene(builder, ssl_name: str, level_store: FileStore,
     skipped_groups: list[str] = []
     material_cache: dict[str, int] = {}
     total_instances = 0
+    total_expected = sum(len(g.instances) for g in groups)
+    progress = None
+    if sr_tui is not None and total_expected > 0:
+        progress = sr_tui.Progress(t("tui_instances"), total_expected)
 
     for group in groups:
         if group.mesh_name not in prototypes:
@@ -1779,6 +1797,8 @@ def build_full_scene(builder, ssl_name: str, level_store: FileStore,
                 skipped_groups.append(f"{group.mesh_name}: {exc}")
                 if verbose:
                     print(t("prototype_skipped", mesh=group.mesh_name, error=exc))
+                if progress is not None:
+                    progress.advance(len(group.instances))
                 continue
 
         mesh_idx = prototypes[group.mesh_name]
@@ -1786,7 +1806,11 @@ def build_full_scene(builder, ssl_name: str, level_store: FileStore,
             tr, q, sc = sr_objects.instance_matrix(inst)
             builder.add_node(mesh_idx, tuple(tr), tuple(q), tuple(sc))
             total_instances += 1
+        if progress is not None:
+            progress.advance(len(group.instances))
 
+    if progress is not None:
+        progress.close()
     return {
         "groups": len(groups),
         "instances": total_instances,
@@ -1800,6 +1824,7 @@ def convert(args: argparse.Namespace) -> int:
     input_path = Path(args.input).expanduser()
     if not input_path.exists():
         eprint(t("error_input_missing", path=input_path))
+        eprint(t("paks_hint_short"))
         return 2
 
     split_x = split_y = 1
@@ -1846,7 +1871,8 @@ def convert(args: argparse.Namespace) -> int:
 
         print(t("map", name=height_name))
         t0 = time.time()
-        height_pct = parse_pct(height_name, store.read(height_name))
+        with _spinner(t("tui_reading_height")):
+            height_pct = parse_pct(height_name, store.read(height_name))
         if height_pct.format_id != 0x37:
             eprint(f"  ! height map имеет формат {height_pct.format_name}, ожидался R16_UNORM")
         height = height_pct.array()
@@ -1861,7 +1887,8 @@ def convert(args: argparse.Namespace) -> int:
         water = None
         if water_name is not None:
             try:
-                water_pct = parse_pct(water_name, store.read(water_name))
+                with _spinner(t("tui_reading_water")):
+                    water_pct = parse_pct(water_name, store.read(water_name))
                 water = water_pct.array()
                 if water.ndim != 2:
                     water = None
@@ -1886,8 +1913,9 @@ def convert(args: argparse.Namespace) -> int:
         if args.max_height is None:
             args.max_height = DEFAULT_FALLBACK_MAX_HEIGHT
 
-        calib = detect_height_scale(height, store, stg_name, ssl_name,
-                                    extent_x, extent_z, args)
+        with _spinner(t("tui_calibrating")):
+            calib = detect_height_scale(height, store, stg_name, ssl_name,
+                                        extent_x, extent_z, args)
         hscale = float(calib["scale"])
         hoffset = float(calib.get("offset", 0.0))
         print(t("height_scale", scale=hscale, maxh=calib["max_height"]))
@@ -2041,7 +2069,8 @@ def convert(args: argparse.Namespace) -> int:
 
         if fmt in ("png", "raw"):
             if fmt == "png":
-                export_heightmap_png(out_path, height, preview=not args.no_preview, water=water)
+                with _spinner(t("tui_export", fmt="PNG")):
+                    export_heightmap_png(out_path, height, preview=not args.no_preview, water=water)
                 print(t("done_simple", path=out_path))
                 if not args.no_preview:
                     print(f"       {out_path.with_name(out_path.stem + '_preview' + out_path.suffix)}")
@@ -2072,8 +2101,9 @@ def convert(args: argparse.Namespace) -> int:
 
         # Build meshes.
         print(t("building_mesh", step=args.step))
-        terrain = build_terrain_mesh(height, extent_x, extent_z, hscale, hoffset,
-                                     args.step, "terrain")
+        with _spinner(t("tui_terrain")):
+            terrain = build_terrain_mesh(height, extent_x, extent_z, hscale, hoffset,
+                                         args.step, "terrain")
         meshes: list[Mesh] = [terrain]
         print(t("terrain_stats", v=terrain.vertex_count, t=terrain.triangle_count))
 
@@ -2083,8 +2113,9 @@ def convert(args: argparse.Namespace) -> int:
                 # The water map is ~6 m per texel. Do not make it finer than
                 # the terrain mesh unless the user explicitly asks for it.
                 water_step = max(1, int(round(args.step * 0.5 / 6.0)))
-            water_mesh = build_water_mesh(water, extent_x, extent_z,
-                                          max(1, water_step), args.water_offset, "water")
+            with _spinner(t("tui_water_mesh")):
+                water_mesh = build_water_mesh(water, extent_x, extent_z,
+                                              max(1, water_step), args.water_offset, "water")
             if water_mesh is not None:
                 meshes.append(water_mesh)
                 print(t("water_stats", v=water_mesh.vertex_count, t=water_mesh.triangle_count))
@@ -2108,6 +2139,7 @@ def convert(args: argparse.Namespace) -> int:
             full_mode = (shared_path is not None and ssl_name is not None)
         if full_mode and (shared_path is None or ssl_name is None or sr_mesh is None):
             eprint(t("error_full_unavailable"))
+            eprint(t("paks_hint_short"))
             full_mode = False
         if full_mode and fmt not in ("glb", "gltf", "stl"):
             eprint(t("error_full_format"))
@@ -2187,10 +2219,11 @@ def convert(args: argparse.Namespace) -> int:
                 print(t("verts_tris", v=builder.stats.vertices, t=builder.stats.triangles))
 
                 print(t("export_to", fmt=fmt.upper(), path=out_path))
-                if fmt == "glb":
-                    builder.export_glb(out_path)
-                else:
-                    builder.export_gltf(out_path)
+                with _spinner(t("tui_export", fmt=fmt.upper())):
+                    if fmt == "glb":
+                        builder.export_glb(out_path)
+                    else:
+                        builder.export_gltf(out_path)
                     print(f"       {out_path.with_suffix('.bin')}")
 
                 if args.preview:
@@ -2210,18 +2243,23 @@ def convert(args: argparse.Namespace) -> int:
 
         print(t("export_to", fmt=fmt.upper(), path=out_path))
         if fmt == "glb":
-            export_glb(out_path, meshes, metadata)
+            with _spinner(t("tui_export", fmt="GLB")):
+                export_glb(out_path, meshes, metadata)
         elif fmt == "gltf":
-            export_gltf(out_path, meshes, metadata)
+            with _spinner(t("tui_export", fmt="glTF")):
+                export_gltf(out_path, meshes, metadata)
             print(f"       {out_path.with_suffix('.bin')}")
         elif fmt == "obj":
-            export_obj(out_path, meshes, write_normals=args.obj_normals,
-                       write_uvs=not args.no_uv)
+            with _spinner(t("tui_export", fmt="OBJ")):
+                export_obj(out_path, meshes, write_normals=args.obj_normals,
+                           write_uvs=not args.no_uv)
             print(f"       {out_path.with_suffix('.mtl')}")
         elif fmt == "ply":
-            export_ply(out_path, meshes, include_colors=not args.no_colors)
+            with _spinner(t("tui_export", fmt="PLY")):
+                export_ply(out_path, meshes, include_colors=not args.no_colors)
         elif fmt == "stl":
-            export_stl(out_path, meshes)
+            with _spinner(t("tui_export", fmt="STL")):
+                export_stl(out_path, meshes)
         else:
             eprint(t("format_not_implemented", fmt=fmt))
             return 2
@@ -2321,12 +2359,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-preview", action="store_true", help=t("help_no_preview"))
     p.add_argument("-v", "--verbose", action="store_true", help=t("help_verbose"))
     p.add_argument("--check", action="store_true", help=t("help_check"))
+    p.add_argument("--no-tui", action="store_true", help=t("help_no_tui"))
+    p.add_argument("--where-paks", action="store_true", help=t("help_where_paks"))
     p.add_argument("--open", dest="open_output", action="store_true",
                    help=t("help_open"))
     p.add_argument("--lang", choices=["ru", "en"], help=t("help_lang"))
     p.add_argument("--reset-config", action="store_true", help=t("help_reset_config"))
     p.add_argument("--version", action="version", version=f"SnowRunner Map Converter {VERSION}")
     return p
+
+
+def _spinner(text: str):
+    return sr_tui.Spinner(text) if sr_tui is not None else nullcontext()
 
 
 def open_in_file_manager(path: Path) -> None:
@@ -2345,6 +2389,17 @@ def open_in_file_manager(path: Path) -> None:
 def maybe_open(args: argparse.Namespace, path: Path) -> None:
     if getattr(args, "open_output", False):
         open_in_file_manager(path)
+
+
+def print_pak_help() -> None:
+    print(t("paks_title"))
+    print(t("paks_needed"))
+    print(t("paks_level"))
+    print(t("paks_shared"))
+    print(t("paks_editor"))
+    print(t("paks_where"))
+    print(t("paks_paths"))
+    print(t("paks_note"))
 
 
 def run_check(args: argparse.Namespace) -> int:
@@ -2397,6 +2452,7 @@ def run_check(args: argparse.Namespace) -> int:
         else:
             print(t("check_paks", status=t("check_none")))
     print(t("check_hint"))
+    print(t("paks_hint_short"))
     print(t("check_done"))
     return 0
 
@@ -2459,6 +2515,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.output_opt:
         args.output = args.output_opt
+    if sr_tui is not None:
+        sr_tui.configure(False if args.no_tui else None)
+    if args.where_paks:
+        print_pak_help()
+        return 0
     if args.check:
         return run_check(args)
     if not args.input:

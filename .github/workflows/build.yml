@@ -51,6 +51,7 @@ jobs:
             --hidden-import sr_textures \
             --hidden-import sr_gltf \
             --hidden-import sr_i18n \
+            --hidden-import sr_tui \
             --hidden-import sr_print \
             --hidden-import sr_split \
             snowrunner_map_converter.py

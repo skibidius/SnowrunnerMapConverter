@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "snowrunner-map-converter"
-version = "1.1.1"
+version = "1.1.2"
 description = "Convert SnowRunner level paks to GLB, OBJ, PLY, STL, PNG and JSON"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -33,6 +33,7 @@ py-modules = [
     "sr_textures",
     "sr_gltf",
     "sr_i18n",
+    "sr_tui",
     "sr_print",
     "sr_split",
 ]

@@ -9,6 +9,14 @@ import numpy as np
 
 import sr_print
 
+try:
+    import sr_tui
+    from sr_i18n import t
+except ImportError:  # pragma: no cover
+    sr_tui = None
+    def t(key, **kwargs):
+        return key.format(**kwargs) if kwargs else key
+
 
 def _clip_triangles_axis(tri: np.ndarray, axis: int, value: float,
                          keep_greater: bool) -> np.ndarray:
@@ -131,6 +139,11 @@ def write_split_stl(base_path: Path, height_raw: np.ndarray,
     tile_info: list[dict[str, Any]] = []
     writers: list[sr_print.StlWriter] = []
     tile_bounds: list[tuple[float, float, float, float, float, float]] = []
+    tile_progress = None
+    if sr_tui is not None:
+        tile_progress = sr_tui.Progress(t("tui_tiles"),
+                                        (len(row_edges) - 1) * (len(col_edges) - 1))
+        tile_progress.update(0)
 
     for ri in range(len(row_edges) - 1):
         for ci in range(len(col_edges) - 1):
@@ -166,11 +179,20 @@ def write_split_stl(base_path: Path, height_raw: np.ndarray,
                 "col": ci + 1,
                 "bounds": [xmin, xmax, ymin, ymax, zmin, zmax],
             })
+            if tile_progress is not None:
+                tile_progress.advance()
+    if tile_progress is not None:
+        tile_progress.close()
 
     # Write object shells into the overlapping tiles.
     if objects and shared_store is not None and object_cache:
         import sr_objects
         eps = 1e-6
+        obj_progress = None
+        if sr_tui is not None:
+            total = sum(len(g.instances) for g in objects)
+            if total:
+                obj_progress = sr_tui.Progress(t("tui_objects"), total)
         for group in objects:
             proto = object_cache.get(group.mesh_name)
             if proto is None:
@@ -199,6 +221,10 @@ def write_split_stl(base_path: Path, height_raw: np.ndarray,
                         clipped = _clip_box(tri, xmin, xmax, ymin, ymax)
                         if len(clipped):
                             writers[ti].add(clipped)
+            if obj_progress is not None:
+                obj_progress.advance(len(group.instances))
+        if obj_progress is not None:
+            obj_progress.close()
 
     for w in writers:
         w.close()

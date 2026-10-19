@@ -8,6 +8,14 @@ from typing import Any
 
 import numpy as np
 
+try:
+    import sr_tui
+    from sr_i18n import t
+except ImportError:  # pragma: no cover
+    sr_tui = None
+    def t(key, **kwargs):
+        return key.format(**kwargs) if kwargs else key
+
 
 STL_DTYPE = np.dtype([
     ("normal", "<f4", (3,)),
@@ -275,6 +283,11 @@ def write_print_stl(path: Path, height_raw: np.ndarray,
         if objects and shared_store is not None and ssl_name is not None:
             import sr_objects
             groups = objects
+            progress = None
+            if sr_tui is not None:
+                total = sum(len(g.instances) for g in groups)
+                if total:
+                    progress = sr_tui.Progress(t("tui_objects"), total)
             for group in groups:
                 proto = object_cache.get(group.mesh_name)
                 if proto is None:
@@ -300,6 +313,10 @@ def write_print_stl(path: Path, height_raw: np.ndarray,
                     tri = np.concatenate(chunk, axis=0)
                     writer.add(tri)
                     object_tris += len(tri)
+                if progress is not None:
+                    progress.advance(len(group.instances))
+            if progress is not None:
+                progress.close()
             if verbose:
                 print(f"  print objects: {object_tris:,} triangles")
     finally:

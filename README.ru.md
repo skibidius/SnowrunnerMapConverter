@@ -24,6 +24,33 @@ python3 -m pip install -r requirements.txt
 
 Готовые бинарники: раздел Releases.
 
+Скрипт показывает прогресс в терминале: спиннеры для коротких операций и прогресс-бары для объектов/текстур/плиток. Для логов и CI есть `--no-tui`.
+
+## Где лежат pak-файлы
+
+Нужны три типа файлов:
+
+- `level_*.pak` — сам уровень, обязателен;
+- `shared.pak` — меши объектов, нужен для полной сцены;
+- `editor.pak` — текстуры объектов, нужен для текстур.
+
+Обычно они лежат в папке игры:
+
+```
+Windows (Steam): C:\Program Files (x86)\Steam\steamapps\common\SnowRunner\preload\paks\
+Windows (Epic):  C:\Program Files\Epic Games\SnowRunner\preload\paks\
+macOS (Steam):   ~/Library/Application Support/Steam/steamapps/common/SnowRunner/preload/paks/
+Linux (Proton):  ~/.steam/steam/steamapps/common/SnowRunner/preload/paks/
+```
+
+Уровни могут быть в подпапке `levels`. Скопируйте нужный `level_*.pak`, `shared.pak` и `editor.pak` в одну папку или укажите пути через `--shared-pak` и `--editor-pak`.
+
+Полная справка:
+
+```bash
+python3 snowrunner_map_converter.py --where-paks
+```
+
 ## Запуск
 
 ```bash
@@ -126,7 +153,7 @@ pyinstaller --onefile --name snowrunner-map-converter \
   --hidden-import sr_mesh --hidden-import sr_objects \
   --hidden-import sr_textures --hidden-import sr_gltf \
   --hidden-import sr_print --hidden-import sr_split \
-  --hidden-import sr_i18n snowrunner_map_converter.py
+  --hidden-import sr_i18n --hidden-import sr_tui snowrunner_map_converter.py
 ```
 
 GitHub Actions собирает Windows, Linux и macOS при пуше. Тег `v*` публикует архивы в Releases.
